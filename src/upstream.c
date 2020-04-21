@@ -48,7 +48,7 @@ proxy_type_name(proxy_type type)
  */
 static struct upstream *upstream_build (const char *host, int port, const char *domain,
                         const char *user, const char *pass,
-			proxy_type type)
+                        proxy_type type)
 {
         char *ptr;
         struct upstream *up;
@@ -90,7 +90,7 @@ static struct upstream *upstream_build (const char *host, int port, const char *
                 up->host = safestrdup (host);
                 up->port = port;
 
-                log_message (LOG_INFO, "Added upstream %s %s:%d for [default]",
+                log_message (LOG_INFO, "Added upstream %s %s:%d for [default, roundrobin]",
                              proxy_type_name(type), host, port);
         } else if (host == NULL || type == PT_NONE) {
                 if (!domain || domain[0] == '\0') {
@@ -153,58 +153,76 @@ fail:
 /*
  * Add an entry to the upstream list
  */
-void upstream_add (const char *host, int port, const char *domain,
-                   const char *user, const char *pass,
-                   proxy_type type, struct upstream **upstream_list)
+int upstream_add (const char *host, int port, const char *domain,
+                  const char *user, const char *pass, proxy_type type,
+                  struct upstream **upstream_list, struct upstream **upstream_list_rr)
 {
         struct upstream *up;
 
         up = upstream_build (host, port, domain, user, pass, type);
         if (up == NULL) {
-                return;
+                return 0;
         }
 
         if (!up->domain && !up->ip) {   /* always add default to end */
                 struct upstream *tmp = *upstream_list;
 
+                if (!tmp) {
+                        up->next = NULL;
+                        *upstream_list = *upstream_list_rr = up;
+                        return 2;
+                }
+
                 while (tmp) {
+                        /*
                         if (!tmp->domain && !tmp->ip) {
                                 log_message (LOG_WARNING,
                                              "Duplicate default upstream");
                                 goto upstream_cleanup;
                         }
+                        */
 
                         if (!tmp->next) {
+                                if ( NULL == *upstream_list_rr ) {
+                                        *upstream_list_rr = up;
+                                }
+
                                 up->next = NULL;
                                 tmp->next = up;
-                                return;
+                                break;
                         }
 
                         tmp = tmp->next;
                 }
+
+                return 2;
         }
 
         up->next = *upstream_list;
         *upstream_list = up;
 
-        return;
-
+        return 1;
+/*
 upstream_cleanup:
         safefree (up->host);
         safefree (up->domain);
         safefree (up);
 
-        return;
+        return 0;
+*/
 }
 
 /*
  * Check if a host is in the upstream list
  */
-struct upstream *upstream_get (char *host, struct upstream *up)
+struct upstream *upstream_get (char *host, struct upstream *up, struct upstream **up_rr, unsigned int up_rr_count)
 {
+        static unsigned int req_num = 0;
+
         in_addr_t my_ip = INADDR_NONE;
 
         while (up) {
+
                 if (up->domain) {
                         if (strcasecmp (host, up->domain) == 0)
                                 break;  /* exact match */
@@ -227,6 +245,9 @@ struct upstream *upstream_get (char *host, struct upstream *up)
 
                         if ((my_ip & up->mask) == up->ip)
                                 break;
+                } else if ( up_rr_count >= 1 ) {
+                        up = up_rr[ req_num++ % up_rr_count ];
+                        break;
                 } else {
                         break;  /* No domain or IP, default upstream */
                 }

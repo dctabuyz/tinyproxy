@@ -62,7 +62,7 @@
  */
 #ifdef UPSTREAM_SUPPORT
 #  define UPSTREAM_CONFIGURED() (config->upstream_list != NULL)
-#  define UPSTREAM_HOST(host) upstream_get(host, config->upstream_list)
+#  define UPSTREAM_HOST(host) upstream_get(host, config->upstream_list, config->upstream_rr, config->upstream_rr_count)
 #  define UPSTREAM_IS_HTTP(conn) (conn->upstream_proxy != NULL && conn->upstream_proxy->type == PT_HTTP)
 #else
 #  define UPSTREAM_CONFIGURED() (0)
@@ -1544,6 +1544,8 @@ void handle_connection (int fd, union sockaddr_union* addr)
         char sock_ipaddr[IP_LENGTH];
         char peer_ipaddr[IP_LENGTH];
 
+        unsigned int upstream_retry_num = 0;
+
         getpeer_information (addr, peer_ipaddr, sizeof(peer_ipaddr));
 
         if (config->bindsame)
@@ -1687,9 +1689,17 @@ e401:
                 goto fail;
         }
 
+try_next_upstream:
         connptr->upstream_proxy = UPSTREAM_HOST (request->host);
         if (connptr->upstream_proxy != NULL) {
                 if (connect_to_upstream (connptr, request) < 0) {
+                        if ( config->upstream_rr_count > upstream_retry_num++ ) {
+                                log_message (LOG_WARNING, "Upstream failed, retry %d/%d", upstream_retry_num, config->upstream_rr_count);
+                                if (connptr->error_string)
+                                        safefree (connptr->error_string);
+                                connptr->error_number = -1;
+                                goto try_next_upstream;
+                        }
                         goto fail;
                 }
         } else {

@@ -162,6 +162,7 @@ static HANDLE_FUNC (handle_xtinyproxy);
 #ifdef UPSTREAM_SUPPORT
 static HANDLE_FUNC (handle_upstream);
 static HANDLE_FUNC (handle_upstream_no);
+static HANDLE_FUNC (handle_upstream_conn_timeout);
 #endif
 
 static void config_free_regex (void);
@@ -219,6 +220,7 @@ struct {
         STDCONF ("startservers", INT, handle_obsolete),
         STDCONF ("maxrequestsperchild", INT, handle_obsolete),
         STDCONF ("timeout", INT, handle_timeout),
+        STDCONF ("upstreamconntimeout", INT, handle_upstream_conn_timeout),
         STDCONF ("connectport", INT, handle_connectport),
         /* alphanumeric arguments */
         STDCONF ("user", ALNUM, handle_user),
@@ -302,6 +304,8 @@ static void free_config (struct config_s *conf)
 #endif
 #ifdef UPSTREAM_SUPPORT
         free_upstream_list (conf->upstream_list);
+        safefree (conf->upstream_rr);
+        conf->upstream_rr_count = 0;
 #endif                          /* UPSTREAM_SUPPORT */
         safefree (conf->pidpath);
         safefree (conf->bind_address);
@@ -417,6 +421,10 @@ static int load_config_file (const char *config_fname, struct config_s *conf)
 {
         FILE *config_file;
         int ret = -1;
+#ifdef UPSTREAM_SUPPORT
+        unsigned int upstream_rr_index = 0;
+        conf->upstream_list_rr = NULL;
+#endif
 
         config_file = fopen (config_fname, "r");
         if (!config_file) {
@@ -431,6 +439,23 @@ static int load_config_file (const char *config_fname, struct config_s *conf)
                          "Not starting.\n");
                 goto done;
         }
+
+#ifdef UPSTREAM_SUPPORT
+        if ( conf->upstream_rr_count > 0 ) {
+                size_t up_rr_size = conf->upstream_rr_count * sizeof(struct upstream *);
+                struct upstream *upstream_rr_pointer = conf->upstream_list_rr;
+                conf->upstream_rr = (struct upstream **) safemalloc(up_rr_size);
+                if (!conf->upstream_rr) {
+                        fprintf (stderr, "Memory allocation for upstream array failed (RR HACK).\n");
+                        goto done;
+                }
+                memset(conf->upstream_rr, 0, up_rr_size);
+                while ( upstream_rr_pointer ) {
+                        conf->upstream_rr[ upstream_rr_index++ ] = upstream_rr_pointer;
+                        upstream_rr_pointer = upstream_rr_pointer->next;
+                }
+        }
+#endif /* UPSTREAM_SUPPORT */
 
         ret = 0;
 
@@ -455,6 +480,10 @@ static void initialize_config_defaults (struct config_s *conf)
         conf->logf_name = NULL;
         conf->pidpath = NULL;
         conf->maxclients = 100;
+
+#ifdef UPSTREAM_SUPPORT
+        conf->upstream_conn_timeout = 15;
+#endif
 }
 
 /**
@@ -499,6 +528,12 @@ int reload_config_file (const char *config_fname, struct config_s *conf)
                              MAX_IDLE_TIME);
                 conf->idletimeout = MAX_IDLE_TIME;
         }
+
+#ifdef UPSTREAM_SUPPORT
+        if ( 0 >= conf->upstream_conn_timeout ) {
+                conf->upstream_conn_timeout = 15;
+        }
+#endif
 
 done:
         return ret;
@@ -1025,7 +1060,9 @@ static HANDLE_FUNC (handle_upstream)
         if (match[mi].rm_so != -1)
                 domain = get_string_arg (line, &match[mi]);
 
-        upstream_add (ip, port, domain, user, pass, pt, &conf->upstream_list);
+        if ( upstream_add (ip, port, domain, user, pass, pt, &conf->upstream_list, &conf->upstream_list_rr) == 2 ) {
+                conf->upstream_rr_count++;
+        }
 
         safefree (user);
         safefree (pass);
@@ -1043,9 +1080,15 @@ static HANDLE_FUNC (handle_upstream_no)
         if (!domain)
                 return -1;
 
-        upstream_add (NULL, 0, domain, 0, 0, PT_NONE, &conf->upstream_list);
+        upstream_add (NULL, 0, domain, 0, 0, PT_NONE, &conf->upstream_list, &conf->upstream_list_rr);
         safefree (domain);
 
         return 0;
 }
+
+static HANDLE_FUNC (handle_upstream_conn_timeout)
+{
+        return set_int_arg (&conf->upstream_conn_timeout, line, &match[2]);
+}
+
 #endif

@@ -54,10 +54,10 @@ struct upstream {
 
 #ifdef UPSTREAM_SUPPORT
 const char *proxy_type_name(proxy_type type);
-extern void upstream_add (const char *host, int port, const char *domain,
-                          const char *user, const char *pass,
-                          proxy_type type, struct upstream **upstream_list);
-extern struct upstream *upstream_get (char *host, struct upstream *up);
+extern int upstream_add (const char *host, int port, const char *domain,
+                         const char *user, const char *pass, proxy_type type,
+			 struct upstream **upstream_list, struct upstream **upstream_rr_list);
+extern struct upstream *upstream_get (char *host, struct upstream *up, struct upstream **upstream_rr, unsigned int up_rr_count);
 extern void free_upstream_list (struct upstream *up);
 #endif /* UPSTREAM_SUPPORT */
 

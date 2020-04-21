@@ -98,6 +98,12 @@ int opensock (const char *host, int port, const char *bind_to)
         struct addrinfo hints, *res, *ressave;
         char portstr[6];
 
+        struct timeval tv;
+        int ret;
+        fd_set wset;
+        char is_success = 0;
+        char is_fail    = 0;
+
         assert (host != NULL);
         assert (port > 0);
 
@@ -142,19 +148,60 @@ int opensock (const char *host, int port, const char *bind_to)
                         }
                 }
 
-                if (connect (sockfd, res->ai_addr, res->ai_addrlen) == 0) {
-                        union sockaddr_union *p = (void*) res->ai_addr, u;
-			int af = res->ai_addr->sa_family;
-                        unsigned dport = ntohs(af == AF_INET ? p->v4.sin_port : p->v6.sin6_port);
-                        socklen_t slen = sizeof u;
-                        if (dport == config->port) {
-                                getsockname(sockfd, (void*)&u, &slen);
-                                loop_records_add(&u);
+                ret = socket_nonblocking (sockfd);
+                if (ret != 0) {
+                        log_message(LOG_ERR, "Failed to set the upstream socket "
+                                    "to non-blocking: %s", strerror(errno));
+                        return -1;
+                }
+
+                ret = connect (sockfd, res->ai_addr, res->ai_addrlen);
+                if ( ret < 0 ) {
+                        if (errno != EINPROGRESS) {
+                                is_fail = 1;
                         }
-                        break;  /* success */
-		}
+                        else {
+                                FD_ZERO (&wset);
+                                tv.tv_sec  = config->upstream_conn_timeout;
+                                tv.tv_usec = 0;
+
+                                FD_SET(sockfd, &wset);
+                                ret = select (sockfd + 1, NULL, &wset, NULL, &tv);
+                                if ( 0 >= ret ) {
+                                        is_fail = 1;
+                                }
+                                else {
+                                        /* if (connect (sockfd, res->ai_addr, res->ai_addrlen) == 0) { */
+                                        union sockaddr_union *p = (void*) res->ai_addr, u;
+                                        int af = res->ai_addr->sa_family;
+                                        unsigned dport = ntohs(af == AF_INET ? p->v4.sin_port : p->v6.sin6_port);
+                                        socklen_t slen = sizeof u;
+                                        if (dport == config->port) {
+                                                getsockname(sockfd, (void*)&u, &slen);
+                                                loop_records_add(&u);
+                                        }
+                                        is_success = 1;
+                                        /* break; */ /* success */
+                                }
+                        }
+                }
+
+                ret = socket_blocking (sockfd);
+                if (ret != 0) {
+                        log_message(LOG_ERR, "Failed to set the upstream socket "
+                                    "to blocking: %s", strerror(errno));
+                        return -1;
+                }
+
+                if ( is_success ) break;
 
                 close (sockfd);
+
+                if ( is_fail ) {
+                        res = NULL;
+                        break;
+                }
+
         } while ((res = res->ai_next) != NULL);
 
         freeaddrinfo (ressave);
