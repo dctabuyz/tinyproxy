@@ -62,7 +62,7 @@ static struct upstream *upstream_build (const char *host, int port, const char *
 
         up->type = type;
         up->host = up->domain = up->ua.user = up->pass = NULL;
-        up->ip = up->mask = 0;
+        up->ip = up->mask = up->suspended_until = 0;
         if (user) {
                 if (type == PT_HTTP) {
                         char b[BASE64ENC_BYTES((256+2)-1) + 1];
@@ -217,7 +217,8 @@ upstream_cleanup:
  */
 struct upstream *upstream_get (char *host, struct upstream *up, struct upstream **up_rr, unsigned int up_rr_count)
 {
-        static unsigned int req_num = 0;
+        static unsigned int up_rr_try_num = 0;
+        unsigned int up_retry_num = 0;
 
         in_addr_t my_ip = INADDR_NONE;
 
@@ -246,7 +247,16 @@ struct upstream *upstream_get (char *host, struct upstream *up, struct upstream 
                         if ((my_ip & up->mask) == up->ip)
                                 break;
                 } else if ( up_rr_count >= 1 ) {
-                        up = up_rr[ req_num++ % up_rr_count ];
+                        while ( up_rr_count >= up_retry_num++ ) {
+                                up = up_rr[ up_rr_try_num++ % up_rr_count ];
+
+                                if ( 0 == up->suspended_until || time(NULL) > up->suspended_until )
+                                        break;
+
+                                log_message (LOG_INFO, "Upstream proxy %s:%d is suspended, trying next...",
+                                                up->host,
+                                                up->port);
+                        };
                         break;
                 } else {
                         break;  /* No domain or IP, default upstream */

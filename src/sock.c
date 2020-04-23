@@ -161,11 +161,12 @@ int opensock (const char *host, int port, const char *bind_to)
                                 is_fail = 1;
                         }
                         else {
-                                FD_ZERO (&wset);
                                 tv.tv_sec  = config->upstream_conn_timeout;
                                 tv.tv_usec = 0;
 
+                                FD_ZERO (&wset);
                                 FD_SET(sockfd, &wset);
+
                                 ret = select (sockfd + 1, NULL, &wset, NULL, &tv);
                                 if ( 0 >= ret ) {
                                         is_fail = 1;

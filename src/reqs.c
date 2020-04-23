@@ -1694,9 +1694,21 @@ try_next_upstream:
         if (connptr->upstream_proxy != NULL) {
                 if (connect_to_upstream (connptr, request) < 0) {
                         if ( config->upstream_rr_count > upstream_retry_num++ ) {
-                                log_message (LOG_WARNING, "Upstream failed, retry %d/%d", upstream_retry_num, config->upstream_rr_count);
+
+                                connptr->upstream_proxy->suspended_until = time(NULL) + 60 * 60;
+
+                                log_message (LOG_WARNING, "Could not connect to upstream proxy, "
+                                               "suspending for 1 hour: %s:%d",
+                                               connptr->upstream_proxy->host,
+                                               connptr->upstream_proxy->port);
+
+                                log_message (LOG_WARNING, "Upstream failed, retry %d/%d",
+                                                upstream_retry_num,
+                                                config->upstream_rr_count);
+
                                 if (connptr->error_string)
                                         safefree (connptr->error_string);
+
                                 connptr->error_number = -1;
                                 goto try_next_upstream;
                         }
