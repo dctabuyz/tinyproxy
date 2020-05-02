@@ -31,6 +31,7 @@
 #include "basicauth.h"
 
 #ifdef UPSTREAM_SUPPORT
+
 const char *
 proxy_type_name(proxy_type type)
 {
@@ -46,14 +47,14 @@ proxy_type_name(proxy_type type)
 /**
  * Construct an upstream struct from input data.
  */
-static struct upstream *upstream_build (const char *host, int port, const char *domain,
-                        const char *user, const char *pass,
-                        proxy_type type)
+static proxy *upstream_build (const char *host, int port, const char *domain,
+                                    const char *user, const char *pass,
+                                    proxy_type type)
 {
         char *ptr;
-        struct upstream *up;
+        proxy *up;
 
-        up = (struct upstream *) safemalloc (sizeof (struct upstream));
+        up = (proxy *) safemalloc (sizeof (proxy));
         if (!up) {
                 log_message (LOG_ERR,
                              "Unable to allocate memory in upstream_build()");
@@ -90,7 +91,7 @@ static struct upstream *upstream_build (const char *host, int port, const char *
                 up->host = safestrdup (host);
                 up->port = port;
 
-                log_message (LOG_INFO, "Added upstream %s %s:%d for [default, roundrobin]",
+                log_message (LOG_INFO, "Added upstream %s %s:%d for [default]",
                              proxy_type_name(type), host, port);
         } else if (host == NULL || type == PT_NONE) {
                 if (!domain || domain[0] == '\0') {
@@ -153,72 +154,70 @@ fail:
 /*
  * Add an entry to the upstream list
  */
-int upstream_add (const char *host, int port, const char *domain,
-                  const char *user, const char *pass, proxy_type type,
-                  struct upstream **upstream_list, struct upstream **upstream_list_rr)
+void upstream_add (const char *host, int port, const char *domain,
+                   const char *user, const char *pass, proxy_type type,
+                   struct proxies **upstream_list)
 {
-        struct upstream *up;
+        struct proxies *new;
+        struct proxies *tmp = *upstream_list;
 
-        up = upstream_build (host, port, domain, user, pass, type);
-        if (up == NULL) {
-                return 0;
+        proxy *pr = upstream_build (host, port, domain, user, pass, type);
+        if (pr == NULL) {
+                return;
         }
 
-        if (!up->domain && !up->ip) {   /* always add default to end */
-                struct upstream *tmp = *upstream_list;
+        /* TODO ip */
 
-                if (!tmp) {
-                        up->next = NULL;
-                        *upstream_list = *upstream_list_rr = up;
-                        return 2;
+        while (tmp) {
+
+                if ( tmp->domain && pr->domain && 0 == strcasecmp(tmp->domain, pr->domain) ) {
+                        goto addproxy;
                 }
 
-                while (tmp) {
-                        /*
-                        if (!tmp->domain && !tmp->ip) {
-                                log_message (LOG_WARNING,
-                                             "Duplicate default upstream");
-                                goto upstream_cleanup;
-                        }
-                        */
-
-                        if (!tmp->next) {
-                                if ( NULL == *upstream_list_rr ) {
-                                        *upstream_list_rr = up;
-                                }
-
-                                up->next = NULL;
-                                tmp->next = up;
-                                break;
-                        }
-
+                if ( tmp->next ) {
                         tmp = tmp->next;
+                        continue;
                 }
 
-                return 2;
+                if ( ! tmp->domain && ! pr->domain ) {
+                        goto addproxy;
+                }
+
+                break;
         }
 
-        up->next = *upstream_list;
-        *upstream_list = up;
+        new = (struct proxies *) safemalloc (sizeof (struct proxies));
+        memset(new, 0, sizeof (struct proxies));
+        new->next      = NULL;
+        new->proxies_v = vector_create();
 
-        return 1;
-/*
-upstream_cleanup:
-        safefree (up->host);
-        safefree (up->domain);
-        safefree (up);
+        if ( pr->domain ) {
+                new->domain = safestrdup( pr->domain );
+                new->next = *upstream_list;
+        }
+        else if ( tmp ) {
+                tmp->next = new;
+        }
 
-        return 0;
-*/
+        if ( ! *upstream_list ) {
+                *upstream_list = new;
+        }
+
+        tmp = new;
+
+addproxy:
+        vector_append(tmp->proxies_v, pr, sizeof(*pr));
+        free(pr->domain);
+        free(pr); /* NOTE vector_append() makes a copy */
 }
 
 /*
  * Check if a host is in the upstream list
  */
-struct upstream *upstream_get (char *host, struct upstream *up, struct upstream **up_rr, unsigned int up_rr_count)
+proxy *upstream_get (char *host, struct proxies *up)
 {
-        static unsigned int up_rr_try_num = 0;
-        unsigned int up_retry_num = 0;
+        static unsigned int try_num   = 0;
+        unsigned        int retry_num = 0;
 
         in_addr_t my_ip = INADDR_NONE;
 
@@ -241,23 +240,12 @@ struct upstream *upstream_get (char *host, struct upstream *up, struct upstream 
                                         break;  /* subdomain match */
                         }
                 } else if (up->ip) {
+                        /* TODO */
                         if (my_ip == INADDR_NONE)
                                 my_ip = ntohl (inet_addr (host));
 
                         if ((my_ip & up->mask) == up->ip)
                                 break;
-                } else if ( up_rr_count >= 1 ) {
-                        while ( up_rr_count >= up_retry_num++ ) {
-                                up = up_rr[ up_rr_try_num++ % up_rr_count ];
-
-                                if ( 0 == up->suspended_until || time(NULL) > up->suspended_until )
-                                        break;
-
-                                log_message (LOG_INFO, "Upstream proxy %s:%d is suspended, trying next...",
-                                                up->host,
-                                                up->port);
-                        };
-                        break;
                 } else {
                         break;  /* No domain or IP, default upstream */
                 }
@@ -265,25 +253,67 @@ struct upstream *upstream_get (char *host, struct upstream *up, struct upstream 
                 up = up->next;
         }
 
-        if (up && (!up->host || !up->port))
-                up = NULL;
+        if ( up && up->proxy_count > 0 ) {
 
-        if (up)
-                log_message (LOG_INFO, "Found upstream proxy %s %s:%d for %s",
-                             proxy_type_name(up->type), up->host, up->port, host);
-        else
-                log_message (LOG_INFO, "No upstream proxy for %s", host);
+                while ( up->proxy_count >= retry_num++ ) {
 
-        return up;
+                        proxy *pr = (proxy *)up->proxies_a[ try_num++ % up->proxy_count ];
+
+                        if ( 0 == pr->suspended_until || time(NULL) > pr->suspended_until ) {
+
+                                log_message (LOG_INFO, "Found upstream proxy %s %s:%d for %s",
+                                             proxy_type_name(pr->type), pr->host, pr->port, host);
+                                return pr;
+                        }
+
+                        log_message (LOG_INFO, "Upstream proxy %s:%d is suspended, trying next...",
+                                        pr->host,
+                                        pr->port);
+                };
+        }
+
+        log_message (LOG_INFO, "No upstream proxy for %s", host);
+        return NULL;
 }
 
-void free_upstream_list (struct upstream *up)
+void init_upstream_arrays(struct proxies **upstream_list) {
+        struct proxies *tmp = *upstream_list;
+
+        while ( tmp ) {
+
+                ssize_t count = vector_length(tmp->proxies_v);
+
+                if ( count > 0 ) {
+                        tmp->proxy_count = 0;
+                        tmp->proxies_a   = safemalloc(count * sizeof(proxy *));
+                        if ( NULL == tmp->proxies_a ) {
+                                /* TODO error message */
+                                return;
+                        }
+
+                        while ( count > tmp->proxy_count ) {
+                                proxy *pr = (proxy *)vector_getentry(tmp->proxies_v, tmp->proxy_count, NULL);
+                                tmp->proxies_a[tmp->proxy_count++] = pr;
+                        }
+                }
+
+                tmp = tmp->next;
+        }
+}
+
+void free_upstream_list (struct proxies *up)
 {
         while (up) {
-                struct upstream *tmp = up;
+                struct proxies *tmp = up;
                 up = up->next;
+                while ( tmp->proxy_count-- > 0 ) {
+                        safefree (tmp->proxies_a[tmp->proxy_count]->host);
+                        safefree (tmp->proxies_a[tmp->proxy_count]->domain);
+                        safefree (tmp->proxies_a[tmp->proxy_count]->ua.user);
+                        safefree (tmp->proxies_a[tmp->proxy_count]->pass);
+                }
+                safefree (tmp->proxies_a);
                 safefree (tmp->domain);
-                safefree (tmp->host);
                 safefree (tmp);
         }
 }

@@ -62,7 +62,7 @@
  */
 #ifdef UPSTREAM_SUPPORT
 #  define UPSTREAM_CONFIGURED() (config->upstream_list != NULL)
-#  define UPSTREAM_HOST(host) upstream_get(host, config->upstream_list, config->upstream_rr, config->upstream_rr_count)
+#  define UPSTREAM_HOST(host) upstream_get(host, config->upstream_proxies)
 #  define UPSTREAM_IS_HTTP(conn) (conn->upstream_proxy != NULL && conn->upstream_proxy->type == PT_HTTP)
 #else
 #  define UPSTREAM_CONFIGURED() (0)
@@ -1428,8 +1428,6 @@ connect_to_upstream (struct conn_s *connptr, struct request_s *request)
                       connptr->server_ip_addr);
 
         if (connptr->server_fd < 0) {
-                log_message (LOG_WARNING,
-                             "Could not connect to upstream proxy.");
                 indicate_http_error (connptr, 404,
                                      "Unable to connect to upstream proxy",
                                      "detail",

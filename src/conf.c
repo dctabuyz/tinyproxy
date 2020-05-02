@@ -303,9 +303,7 @@ static void free_config (struct config_s *conf)
         safefree (conf->reversebaseurl);
 #endif
 #ifdef UPSTREAM_SUPPORT
-        free_upstream_list (conf->upstream_list);
-        safefree (conf->upstream_rr);
-        conf->upstream_rr_count = 0;
+        free_upstream_list (conf->upstream_proxies);
 #endif                          /* UPSTREAM_SUPPORT */
         safefree (conf->pidpath);
         safefree (conf->bind_address);
@@ -422,8 +420,7 @@ static int load_config_file (const char *config_fname, struct config_s *conf)
         FILE *config_file;
         int ret = -1;
 #ifdef UPSTREAM_SUPPORT
-        unsigned int upstream_rr_index = 0;
-        conf->upstream_list_rr = NULL;
+        conf->upstream_proxies = NULL;
 #endif
 
         config_file = fopen (config_fname, "r");
@@ -441,20 +438,7 @@ static int load_config_file (const char *config_fname, struct config_s *conf)
         }
 
 #ifdef UPSTREAM_SUPPORT
-        if ( conf->upstream_rr_count > 0 ) {
-                size_t up_rr_size = conf->upstream_rr_count * sizeof(struct upstream *);
-                struct upstream *upstream_rr_pointer = conf->upstream_list_rr;
-                conf->upstream_rr = (struct upstream **) safemalloc(up_rr_size);
-                if (!conf->upstream_rr) {
-                        fprintf (stderr, "Memory allocation for upstream array failed (RR HACK).\n");
-                        goto done;
-                }
-                memset(conf->upstream_rr, 0, up_rr_size);
-                while ( upstream_rr_pointer ) {
-                        conf->upstream_rr[ upstream_rr_index++ ] = upstream_rr_pointer;
-                        upstream_rr_pointer = upstream_rr_pointer->next;
-                }
-        }
+        init_upstream_arrays(&conf->upstream_proxies);
 #endif /* UPSTREAM_SUPPORT */
 
         ret = 0;
@@ -1060,9 +1044,7 @@ static HANDLE_FUNC (handle_upstream)
         if (match[mi].rm_so != -1)
                 domain = get_string_arg (line, &match[mi]);
 
-        if ( upstream_add (ip, port, domain, user, pass, pt, &conf->upstream_list, &conf->upstream_list_rr) == 2 ) {
-                conf->upstream_rr_count++;
-        }
+        upstream_add (ip, port, domain, user, pass, pt, &conf->upstream_proxies);
 
         safefree (user);
         safefree (pass);
@@ -1080,7 +1062,7 @@ static HANDLE_FUNC (handle_upstream_no)
         if (!domain)
                 return -1;
 
-        upstream_add (NULL, 0, domain, 0, 0, PT_NONE, &conf->upstream_list, &conf->upstream_list_rr);
+        upstream_add (NULL, 0, domain, 0, 0, PT_NONE, &conf->upstream_proxies);
         safefree (domain);
 
         return 0;

@@ -64,8 +64,7 @@ struct config_s {
 #endif
 #ifdef UPSTREAM_SUPPORT
         struct upstream *upstream_list;
-        struct upstream *upstream_list_rr;  /* pointer to first "default" (without specific host/ip) upstream */
-        struct upstream **upstream_rr;      /* array of rr upstreams  */
+        struct proxies  *upstream_proxies;
         unsigned int upstream_rr_count;     /* number of rr upstreams */
         unsigned int upstream_conn_timeout; /* upstream connect wait timeout */
 #endif                          /* UPSTREAM_SUPPORT */

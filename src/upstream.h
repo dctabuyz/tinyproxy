@@ -26,6 +26,7 @@
 #define _TINYPROXY_UPSTREAM_H_
 
 #include "common.h"
+#include "vector.h"
 
 /*
  * Even if upstream support is not compiled into tinyproxy, this
@@ -53,13 +54,28 @@ struct upstream {
         time_t suspended_until; /* timestamp */
 };
 
+typedef struct upstream proxy;
+
+struct proxies {
+        vector_t proxies_v;       /* vector of proxies. we'll use it while config loadin */
+        proxy **proxies_a;        /* array  of proxies.  we'll use it for real work */
+	unsigned int proxy_count; /* number of proxies_a elements */
+        char *domain;             /* optional */
+        in_addr_t ip, mask;       /* optional */
+        struct proxies *next;
+};
+
 #ifdef UPSTREAM_SUPPORT
 const char *proxy_type_name(proxy_type type);
-extern int upstream_add (const char *host, int port, const char *domain,
-                         const char *user, const char *pass, proxy_type type,
-                         struct upstream **upstream_list, struct upstream **upstream_rr_list);
-extern struct upstream *upstream_get (char *host, struct upstream *up, struct upstream **upstream_rr, unsigned int up_rr_count);
-extern void free_upstream_list (struct upstream *up);
+
+void upstream_add (const char *host, int port, const char *domain,
+                   const char *user, const char *pass, proxy_type type,
+                   struct proxies **upstream_list);
+
+void init_upstream_arrays(struct proxies **upstream_list);
+
+extern      proxy  *upstream_get (char *host, struct proxies *up);
+extern void free_upstream_list (struct proxies  *up);
 #endif /* UPSTREAM_SUPPORT */
 
 #endif /* _TINYPROXY_UPSTREAM_H_ */
