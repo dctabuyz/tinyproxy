@@ -65,7 +65,6 @@ struct config_s {
 #ifdef UPSTREAM_SUPPORT
         struct upstream *upstream_list;
         struct proxies  *upstream_proxies;
-        unsigned int upstream_rr_count;     /* number of rr upstreams */
         unsigned int upstream_conn_timeout; /* upstream connect wait timeout */
 #endif                          /* UPSTREAM_SUPPORT */
         char *pidpath;

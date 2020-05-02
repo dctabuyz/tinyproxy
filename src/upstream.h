@@ -52,16 +52,14 @@ struct upstream {
         in_addr_t ip, mask;
         proxy_type type;
         time_t suspended_until; /* timestamp */
+        unsigned proxy_count;
 };
 
-typedef struct upstream proxy;
-
 struct proxies {
-        vector_t proxies_v;       /* vector of proxies. we'll use it while config loadin */
-        proxy **proxies_a;        /* array  of proxies.  we'll use it for real work */
-	unsigned int proxy_count; /* number of proxies_a elements */
-        char *domain;             /* optional */
-        in_addr_t ip, mask;       /* optional */
+        vector_t proxies_v;          /* vector of proxies. we use it while config loading */
+        struct upstream **proxies_a; /* array  of proxies. we use it for real work */
+        char *domain;                /* optional */
+        in_addr_t ip, mask;          /* optional */
         struct proxies *next;
 };
 
@@ -74,7 +72,7 @@ void upstream_add (const char *host, int port, const char *domain,
 
 void init_upstream_arrays(struct proxies **upstream_list);
 
-extern      proxy  *upstream_get (char *host, struct proxies *up);
+extern      struct upstream *upstream_get (char *host, struct proxies *up);
 extern void free_upstream_list (struct proxies  *up);
 #endif /* UPSTREAM_SUPPORT */
 

@@ -47,14 +47,14 @@ proxy_type_name(proxy_type type)
 /**
  * Construct an upstream struct from input data.
  */
-static proxy *upstream_build (const char *host, int port, const char *domain,
+static struct upstream *upstream_build (const char *host, int port, const char *domain,
                                     const char *user, const char *pass,
                                     proxy_type type)
 {
         char *ptr;
-        proxy *up;
+        struct upstream *up;
 
-        up = (proxy *) safemalloc (sizeof (proxy));
+        up = (struct upstream *) safemalloc (sizeof (struct upstream));
         if (!up) {
                 log_message (LOG_ERR,
                              "Unable to allocate memory in upstream_build()");
@@ -161,7 +161,7 @@ void upstream_add (const char *host, int port, const char *domain,
         struct proxies *new;
         struct proxies *tmp = *upstream_list;
 
-        proxy *pr = upstream_build (host, port, domain, user, pass, type);
+        struct upstream *pr = upstream_build (host, port, domain, user, pass, type);
         if (pr == NULL) {
                 return;
         }
@@ -207,14 +207,14 @@ void upstream_add (const char *host, int port, const char *domain,
 
 addproxy:
         vector_append(tmp->proxies_v, pr, sizeof(*pr));
-        free(pr->domain);
+        /* free(pr->domain); */
         free(pr); /* NOTE vector_append() makes a copy */
 }
 
 /*
  * Check if a host is in the upstream list
  */
-proxy *upstream_get (char *host, struct proxies *up)
+struct upstream *upstream_get (char *host, struct proxies *up)
 {
         static unsigned int try_num   = 0;
         unsigned        int retry_num = 0;
@@ -253,11 +253,13 @@ proxy *upstream_get (char *host, struct proxies *up)
                 up = up->next;
         }
 
-        if ( up && up->proxy_count > 0 ) {
+        if ( up ) {
 
-                while ( up->proxy_count >= retry_num++ ) {
+                ssize_t total_proxies = vector_length(up->proxies_v);
 
-                        proxy *pr = (proxy *)up->proxies_a[ try_num++ % up->proxy_count ];
+                while ( total_proxies > retry_num++ ) {
+
+                        struct upstream *pr = (struct upstream *)up->proxies_a[ try_num++ % total_proxies ];
 
                         if ( 0 == pr->suspended_until || time(NULL) > pr->suspended_until ) {
 
@@ -281,19 +283,20 @@ void init_upstream_arrays(struct proxies **upstream_list) {
 
         while ( tmp ) {
 
-                ssize_t count = vector_length(tmp->proxies_v);
+                ssize_t total_proxies = vector_length(tmp->proxies_v);
+                ssize_t proxy_counter = 0;
 
-                if ( count > 0 ) {
-                        tmp->proxy_count = 0;
-                        tmp->proxies_a   = safemalloc(count * sizeof(proxy *));
+                if ( total_proxies > 0 ) {
+                        tmp->proxies_a = safemalloc(total_proxies * sizeof(struct upstream *));
                         if ( NULL == tmp->proxies_a ) {
                                 /* TODO error message */
                                 return;
                         }
 
-                        while ( count > tmp->proxy_count ) {
-                                proxy *pr = (proxy *)vector_getentry(tmp->proxies_v, tmp->proxy_count, NULL);
-                                tmp->proxies_a[tmp->proxy_count++] = pr;
+                        while ( total_proxies > proxy_counter ) {
+                                struct upstream *pr = (struct upstream *)vector_getentry(tmp->proxies_v, proxy_counter, NULL);
+                                pr->proxy_count = total_proxies;
+                                tmp->proxies_a[proxy_counter++] = pr;
                         }
                 }
 
@@ -305,15 +308,19 @@ void free_upstream_list (struct proxies *up)
 {
         while (up) {
                 struct proxies *tmp = up;
-                up = up->next;
-                while ( tmp->proxy_count-- > 0 ) {
-                        safefree (tmp->proxies_a[tmp->proxy_count]->host);
-                        safefree (tmp->proxies_a[tmp->proxy_count]->domain);
-                        safefree (tmp->proxies_a[tmp->proxy_count]->ua.user);
-                        safefree (tmp->proxies_a[tmp->proxy_count]->pass);
+                ssize_t total_proxies = vector_length(tmp->proxies_v);
+                up = tmp->next;
+                while ( total_proxies-- > 0 ) {
+                        safefree (tmp->proxies_a[total_proxies]->host);
+                        if ( tmp->proxies_a[total_proxies]->domain )
+                                safefree (tmp->proxies_a[total_proxies]->domain);
+                        safefree (tmp->proxies_a[total_proxies]->ua.user);
+                        safefree (tmp->proxies_a[total_proxies]->pass);
                 }
                 safefree (tmp->proxies_a);
-                safefree (tmp->domain);
+                if ( tmp->domain )
+                        safefree (tmp->domain);
+                vector_delete(tmp->proxies_v);
                 safefree (tmp);
         }
 }
