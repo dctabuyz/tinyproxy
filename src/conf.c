@@ -163,6 +163,7 @@ static HANDLE_FUNC (handle_xtinyproxy);
 static HANDLE_FUNC (handle_upstream);
 static HANDLE_FUNC (handle_upstream_no);
 static HANDLE_FUNC (handle_upstream_conn_timeout);
+static HANDLE_FUNC (handle_use_http_proxy_header);
 #endif
 
 static void config_free_regex (void);
@@ -220,7 +221,6 @@ struct {
         STDCONF ("startservers", INT, handle_obsolete),
         STDCONF ("maxrequestsperchild", INT, handle_obsolete),
         STDCONF ("timeout", INT, handle_timeout),
-        STDCONF ("upstreamconntimeout", INT, handle_upstream_conn_timeout),
         STDCONF ("connectport", INT, handle_connectport),
         /* alphanumeric arguments */
         STDCONF ("user", ALNUM, handle_user),
@@ -263,6 +263,8 @@ struct {
                       ":" INT "(" WS STR ")?"
                 END, handle_upstream, NULL
         },
+        STDCONF ("upstreamconntimeout", INT, handle_upstream_conn_timeout),
+        STDCONF ("useproxyheader", BOOL, handle_use_http_proxy_header),
 #endif
         /* loglevel */
         STDCONF ("loglevel", "(critical|error|warning|notice|connect|info)",
@@ -1071,6 +1073,11 @@ static HANDLE_FUNC (handle_upstream_no)
 static HANDLE_FUNC (handle_upstream_conn_timeout)
 {
         return set_int_arg (&conf->upstream_conn_timeout, line, &match[2]);
+}
+
+static HANDLE_FUNC (handle_use_http_proxy_header)
+{
+        return set_bool_arg (&conf->use_http_proxy_header, line, &match[2]);
 }
 
 #endif

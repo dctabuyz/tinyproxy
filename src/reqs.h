@@ -31,6 +31,11 @@
 #define HTTP_PORT 80
 #define HTTP_PORT_SSL 443
 
+#define MIN_HOST_LEN 7
+#define SEP_CHAR  ":"
+#define MIN_PORT  1
+#define MAX_PORT  65535
+
 /*
  * This structure holds the information pulled from a URL request.
  */

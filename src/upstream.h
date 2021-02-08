@@ -66,6 +66,11 @@ struct proxies {
 #ifdef UPSTREAM_SUPPORT
 const char *proxy_type_name(proxy_type type);
 
+
+struct upstream *upstream_build (const char *host, int port, const char *domain,
+                                        const char *user, const char *pass,
+                                        proxy_type type);
+
 void upstream_add (const char *host, int port, const char *domain,
                    const char *user, const char *pass, proxy_type type,
                    struct proxies **upstream_list);

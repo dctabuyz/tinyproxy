@@ -417,7 +417,6 @@ BAD_REQUEST_ERROR:
                                              "url", url, NULL);
                         goto fail;
                 }
-
                 /* Verify that the port in the CONNECT method is allowed */
                 if (!check_allowed_connect_ports (request->port,
                                                   config->connect_ports))
@@ -1497,7 +1496,7 @@ get_request_entity(struct conn_s *connptr)
                              "Error calling select on client fd %d: %s",
                              connptr->client_fd, strerror(errno));
         } else if (ret == 0) {
-               log_message (LOG_INFO, "no entity");
+                log_message (LOG_INFO, "no entity");
         } else if (ret == 1 && FD_ISSET (connptr->client_fd, &rset)) {
                 ssize_t nread;
                 nread = read_buffer (connptr->client_fd, connptr->cbuffer);
@@ -1522,6 +1521,80 @@ get_request_entity(struct conn_s *connptr)
         return ret;
 }
 
+/*
+ * naiive verify ipv4 address
+ *
+ */
+static int
+is_ipv4_host(char *ip)
+{
+        unsigned char buf[sizeof(struct in_addr)];
+        char str[INET_ADDRSTRLEN];
+
+        if (       inet_pton(AF_INET, ip, buf) > 0
+                && inet_ntop(AF_INET, buf, str, INET_ADDRSTRLEN)
+
+                && ( buf[0] >   0 )
+                && ( buf[0] < 255 ) /* RESERVED       */
+                && ( buf[3] >   0 ) /* NET ADDR       */
+                && ( buf[3] < 255 ) /* BROADCAST ADDR */
+        ) {
+                return 1;
+        }
+
+        return 0;
+}
+
+/*
+ * get host and port from string
+ *
+ */
+static int
+split_addr_port(char *header, char **host, unsigned short *port)
+{
+        char *sep_pos;
+        size_t host_length;
+        int _port;
+
+        size_t header_length = strlen(header);
+
+        if ( ! (header_length > 0) )
+        {
+                return 0;
+        }
+
+        sep_pos = strstr(header, SEP_CHAR);
+        if ( ! sep_pos )
+        {
+                return 0;
+        }
+
+        host_length = sep_pos - header;
+        if ( MIN_HOST_LEN > host_length )
+        {
+                return 0;
+        }
+
+        if ( NULL == (*host = safemalloc(host_length + 1)) )
+        {
+                log_message (LOG_ERR, "split_addr_port: Memory allocation failed.");
+                return 0;
+        }
+
+        strncpy(*host, header, host_length);
+        (*host)[host_length] = '\0';
+
+        _port = atoi(sep_pos + 1);
+        if (    _port < MIN_PORT
+             || _port > MAX_PORT
+        ) {
+                safefree(*host);
+                return 0;
+        }
+
+        *port = _port;
+        return 1;
+}
 
 /*
  * This is the main drive for each connection. As you can tell, for the
@@ -1543,6 +1616,13 @@ void handle_connection (int fd, union sockaddr_union* addr)
         char peer_ipaddr[IP_LENGTH];
 
         unsigned int upstream_retry_num = 0;
+
+        /* use-http-proxy header */
+        char *header_use_http_proxy;
+        char *use_http_proxy_host;
+        unsigned short use_http_proxy_port;
+        ssize_t header_use_http_proxy_len  = 0;
+        struct upstream *custom_http_proxy = NULL;
 
         getpeer_information (addr, peer_ipaddr, sizeof(peer_ipaddr));
 
@@ -1640,6 +1720,7 @@ void handle_connection (int fd, union sockaddr_union* addr)
                 }
 
                 if (len == 0) {
+                        log_message (LOG_ERR, "handle_connection: Proxy Authentication Required. No auth info.");
                         if (stathost_connect) goto e401;
                         update_stats (STAT_DENIED);
                         indicate_http_error (connptr, 407, "Proxy Authentication Required",
@@ -1654,6 +1735,7 @@ void handle_connection (int fd, union sockaddr_union* addr)
                         basicauth_check (config->basicauth_list, authstring + 6) == 1)
                                 failure = 0;
                 if(failure) {
+                        log_message (LOG_ERR, "handle_connection: Proxy Authentication Required. Invalid auth info.");
 e401:
                         update_stats (STAT_DENIED);
                         indicate_http_error (connptr, 401, "Unauthorized",
@@ -1687,11 +1769,54 @@ e401:
                 goto fail;
         }
 
+        if ( config->use_http_proxy_header ) {
+                log_message(LOG_INFO, "use-http-proxy header required");
+
+                header_use_http_proxy_len = hashmap_entry_by_key (hashofheaders, "use-http-proxy", (void **) &header_use_http_proxy);
+
+                header_use_http_proxy_len = hashmap_entry_by_key (hashofheaders, "use-http-proxy", (void **) &header_use_http_proxy);
+
+                if ( ! (header_use_http_proxy_len > 0) ) {
+                        log_message (LOG_ERR, "use-http-proxy header is empty.");
+                        indicate_http_error (connptr, 567, "Use-Http-Proxy not set", "detail", "Use-Http-Proxy header is not set.", NULL);
+                        goto fail;
+                }
+
+                log_message(LOG_INFO, "use-http-proxy header value is `%s`", header_use_http_proxy);
+
+                if ( split_addr_port(header_use_http_proxy, &use_http_proxy_host, &use_http_proxy_port) == 0 ) {
+                        log_message (LOG_ERR, "Invalid use-http-proxy header value: %s", header_use_http_proxy);
+                        indicate_http_error (connptr, 567, "Use-Http-Proxy not valid", "detail", "Use-Http-Proxy header is not valid.", NULL);
+                        goto fail;
+                }
+
+                if ( ! is_ipv4_host(use_http_proxy_host) )
+                {
+                        log_message (LOG_ERR, "Invalid use-http-proxy host value: %s", header_use_http_proxy);
+                        indicate_http_error (connptr, 567, "Use-Http-Proxy host is not valid", "detail", "Use-Http-Proxy host is not valid.", NULL);
+                        goto fail;
+                }
+
+                custom_http_proxy = upstream_build(use_http_proxy_host, use_http_proxy_port, NULL, NULL, NULL, PT_HTTP);
+                if ( ! custom_http_proxy ) {
+                        log_message (LOG_ERR, "Unable to build proxy structure for %s", header_use_http_proxy);
+                        indicate_http_error (connptr, 500, "Proxy internal error", "detail", "Unable to build upstream for Use-Http-Proxy", NULL);
+                        goto fail;
+                }
+                connptr->upstream_proxy = custom_http_proxy;
+
+                hashmap_remove(hashofheaders, "use-http-proxy");
+	}
+
+
 try_next_upstream:
-        connptr->upstream_proxy = UPSTREAM_HOST (request->host);
+        if ( ! config->use_http_proxy_header ) {
+		connptr->upstream_proxy = UPSTREAM_HOST (request->host);
+	}
+
         if (connptr->upstream_proxy != NULL) {
                 if (connect_to_upstream (connptr, request) < 0) {
-                        if ( connptr->upstream_proxy->proxy_count > upstream_retry_num++ ) {
+                        if ( !config->use_http_proxy_header && connptr->upstream_proxy->proxy_count > upstream_retry_num++ ) {
 
                                 connptr->upstream_proxy->suspended_until = time(NULL) + 60 * 60;
 
@@ -1785,9 +1910,19 @@ fail:
                 showstats (connptr);
         }
 
+        if ( connptr->upstream_proxy ) {
+                log_message (LOG_WARNING,
+                             "Request failed, upstream is %s:%d",
+                              connptr->upstream_proxy->host,
+                              connptr->upstream_proxy->port);
+	}
+
 done:
         free_request_struct (request);
         hashmap_delete (hashofheaders);
         destroy_conn (connptr);
+        if ( custom_http_proxy ) {
+                safefree(custom_http_proxy);
+        }
         return;
 }

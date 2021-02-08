@@ -66,6 +66,7 @@ struct config_s {
         struct upstream *upstream_list;
         struct proxies  *upstream_proxies;
         unsigned int upstream_conn_timeout; /* upstream connect wait timeout */
+        unsigned int use_http_proxy_header; /* boolean, accept proxy from header Use-Http-Proxy */
 #endif                          /* UPSTREAM_SUPPORT */
         char *pidpath;
         unsigned int idletimeout;

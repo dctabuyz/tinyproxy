@@ -47,9 +47,9 @@ proxy_type_name(proxy_type type)
 /**
  * Construct an upstream struct from input data.
  */
-static struct upstream *upstream_build (const char *host, int port, const char *domain,
-                                    const char *user, const char *pass,
-                                    proxy_type type)
+struct upstream *upstream_build (const char *host, int port, const char *domain,
+                                 const char *user, const char *pass,
+                                 proxy_type type)
 {
         char *ptr;
         struct upstream *up;
@@ -208,7 +208,7 @@ void upstream_add (const char *host, int port, const char *domain,
 addproxy:
         vector_append(tmp->proxies_v, pr, sizeof(*pr));
         /* free(pr->domain); */
-        free(pr); /* NOTE vector_append() makes a copy */
+        safefree(pr); /* NOTE vector_append() makes a copy */
 }
 
 /*
