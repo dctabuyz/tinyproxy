@@ -1798,6 +1798,8 @@ e401:
                 }
 
                 custom_http_proxy = upstream_build(use_http_proxy_host, use_http_proxy_port, NULL, NULL, NULL, PT_HTTP);
+                safefree(use_http_proxy_host);
+
                 if ( ! custom_http_proxy ) {
                         log_message (LOG_ERR, "Unable to build proxy structure for %s", header_use_http_proxy);
                         indicate_http_error (connptr, 500, "Proxy internal error", "detail", "Unable to build upstream for Use-Http-Proxy", NULL);
@@ -1922,6 +1924,7 @@ done:
         hashmap_delete (hashofheaders);
         destroy_conn (connptr);
         if ( custom_http_proxy ) {
+                safefree(custom_http_proxy->host);
                 safefree(custom_http_proxy);
         }
         return;
