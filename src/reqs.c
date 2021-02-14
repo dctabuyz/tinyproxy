@@ -1563,7 +1563,7 @@ split_addr_port(char *header, char **host, unsigned short *port)
                 return 0;
         }
 
-        sep_pos = strstr(header, SEP_CHAR);
+        sep_pos = strchr(header, SEP_CHAR);
         if ( ! sep_pos )
         {
                 return 0;
