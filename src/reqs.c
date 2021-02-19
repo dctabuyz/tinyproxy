@@ -1619,7 +1619,7 @@ void handle_connection (int fd, union sockaddr_union* addr)
 
         /* use-http-proxy header */
         char *header_use_http_proxy;
-        char *use_http_proxy_host;
+        char *use_http_proxy_host = NULL;
         unsigned short use_http_proxy_port;
         ssize_t header_use_http_proxy_len  = 0;
         struct upstream *custom_http_proxy = NULL;
@@ -1774,8 +1774,6 @@ e401:
 
                 header_use_http_proxy_len = hashmap_entry_by_key (hashofheaders, "use-http-proxy", (void **) &header_use_http_proxy);
 
-                header_use_http_proxy_len = hashmap_entry_by_key (hashofheaders, "use-http-proxy", (void **) &header_use_http_proxy);
-
                 if ( ! (header_use_http_proxy_len > 0) ) {
                         log_message (LOG_ERR, "use-http-proxy header is empty.");
                         indicate_http_error (connptr, 567, "Use-Http-Proxy not set", "detail", "Use-Http-Proxy header is not set.", NULL);
@@ -1798,7 +1796,6 @@ e401:
                 }
 
                 custom_http_proxy = upstream_build(use_http_proxy_host, use_http_proxy_port, NULL, NULL, NULL, PT_HTTP);
-                safefree(use_http_proxy_host);
 
                 if ( ! custom_http_proxy ) {
                         log_message (LOG_ERR, "Unable to build proxy structure for %s", header_use_http_proxy);
@@ -1923,6 +1920,11 @@ done:
         free_request_struct (request);
         hashmap_delete (hashofheaders);
         destroy_conn (connptr);
+
+        if ( use_http_proxy_host ) {
+                safefree(use_http_proxy_host);
+        }
+
         if ( custom_http_proxy ) {
                 safefree(custom_http_proxy->host);
                 safefree(custom_http_proxy);
